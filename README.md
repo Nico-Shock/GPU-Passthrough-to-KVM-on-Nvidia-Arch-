@@ -73,6 +73,9 @@ Replace `your,ids` with your GPU IDs.
 ### Reboot Your System: 
 `sudo reboot now`
 
+### Load vfio-pci modules
+`sudo modprobe vfio-pci`
+
 ### Add the GPU to Your VM in KVM:
 ### *In your VM settings, click "Add" and select your NVIDIA GPU and NVIDIA audio device.*
 
