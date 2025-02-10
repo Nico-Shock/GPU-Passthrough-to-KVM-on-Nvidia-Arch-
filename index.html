@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KVM GPU Passthrough Guide</title>
+  <style>
+    /* Fluent Midnight Theme & Centered Container, modern und abgerundet */
+    body {
+      background-color: #121212;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 17px;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+    }
+    .container {
+      max-width: 960px;
+      width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    h1, h2, h3, h4 {
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+    ul {
+      list-style-type: disc;
+      padding-left: 40px;
+      margin-bottom: 20px;
+    }
+    pre {
+      background-color: #1e1e1e;
+      padding: 10px;
+      overflow-x: auto;
+      margin: 10px 0;
+      border-radius: 5px;
+    }
+    code {
+      font-family: monospace;
+      color: #c3c3c3;
+    }
+    p {
+      line-height: 1.5;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Requirements -->
+    <h1>Requirements:</h1>
+    <ul>
+      <li>Installed Chaotic-AUR repositories</li>
+      <li>Already installed Windows on KVM (or any other OS)</li>
+      <li>2 GPUs (dedicated and iGPU works too)</li>
+      <li>Virtualization and IOMMU enabled in your BIOS/UEFI</li>
+      <li>An HDMI cable connected to your motherboard if you have an iGPU as a second GPU</li>
+    </ul>
+
+    <!-- Read Warning -->
+    <h2><em>MAKE SURE TO READ EVERYTHING FIRST BEFORE CONTINUING AND ENSURE YOU UNDERSTAND EVERYTHING SHOWN</em></h2>
+
+    <!-- Install KVM -->
+    <h3>Install KVM if not already done:</h3>
+    <pre><code>sudo pacman -S qemu-full virt-manager bridge-utils libguestfs dnsmasq vde2 openbsd-netcat && sudo systemctl enable libvirtd && sudo systemctl start libvirtd && sudo usermod -aG kvm $USER && sudo usermod -aG libvirt $USER && sudo virsh net-start default && sudo virsh net-autostart default</code></pre>
+
+    <!-- Install VFIO Linux Kernel -->
+    <h3>Install the VFIO Linux Kernel:</h3>
+    <pre><code>sudo pacman -S linux-vfio linux-vfio-headers</code></pre>
+
+    <!-- Get Your GPU IDs -->
+    <h3>Get Your GPU IDs:</h3>
+    <pre><code>lspci -nn | grep -E "NVIDIA"</code></pre>
+    <p>
+      Trim the IDs and separate them with commas (<code>,</code>) only.<br>
+      Save the IDs somewhere.<br>
+      You will need both your GPU ID and your GPU audio device ID.
+    </p>
+    <h4>For AMD Users:</h4>
+    <pre><code>lspci -nn | grep -E "AMD"</code></pre>
+    <h4>For Intel Users:</h4>
+    <pre><code>lspci -nn | grep -E "Intel"</code></pre>
+
+    <!-- Boot from the VFIO Kernel -->
+    <h2>Boot from the VFIO Kernel:</h2>
+
+    <h3>Edit your bootloader configuration for GRUB:</h3>
+    <p>Edit the file: <code>sudo vim /boot/grub/grub.cfg</code></p>
+    <p>Then add the following to your "GRUB_CMDLINE" configuration:</p>
+    <pre><code>amd_iommu=on iommu=pt vfio-pci.ids=your,ids</code></pre>
+    <p>Then change your configuration:</p>
+    <pre><code>GRUB_DEFAULT="0" -> 1&gt;2 (replace with your number)</code></pre>
+    <p>
+      If you're booting from the GRUB menu, you can go under "Advanced options" and see the different kernels. The first option is always <code>0</code>, the second is <code>1</code>, and so on. You want to change it to the <code>linux-vfio</code> kernel.<br>
+      To boot from the "Advanced options," use <code>GRUB_DEFAULT="1&gt;2"</code> with the extra <code>&gt;</code> sign to select the correct kernel (replace <code>2</code> with the correct boot option).
+    </p>
+    <p>For GRUB, run:</p>
+    <pre><code>sudo grub-mkconfig -o /boot/grub/grub.cfg</code></pre>
+
+    <h3>Edit your bootloader configuration for Systemd:</h3>
+    <p>Edit the file: <code>sudo vim /boot/loader/entries/arch.conf</code></p>
+    <p>Add after the "rw":</p>
+    <pre><code>amd_iommu=on iommu=pt vfio-pci.ids=your,ids</code></pre>
+    <p>Then change the bootloader configuration to (DO NOT REMOVE ANYTHING):</p>
+    <pre><code>linux /vmlinuz-linux-vfio
+initrd /initramfs-linux-vfio.img</code></pre>
+    <p>
+      <em>*You can replace <code>amd_iommu=on</code> with <code>intel_iommu=on</code> if you have an Intel CPU.*</em><br>
+      <em>*Replace <code>your,ids</code> with the IDs you saved earlier.*</em>
+    </p>
+
+    <!-- Create and Edit the Modprobe Config File -->
+    <h3>Create and Edit the Modprobe Config File:</h3>
+    <pre><code>sudo touch /etc/modprobe.d/vfio.conf
+sudo vim /etc/modprobe.d/vfio.conf</code></pre>
+    <p>Paste the following into the file:</p>
+    <pre><code>options vfio-pci ids=your,ids
+softdep nvidia pre: vfio-pci</code></pre>
+    <p>Replace <code>your,ids</code> with your GPU IDs.</p>
+
+    <!-- Update the Initramfs -->
+    <h3>Update the Initramfs:</h3>
+    <pre><code>sudo mkinitcpio -P linux-vfio</code></pre>
+
+    <!-- Reboot Your System -->
+    <h3>Reboot Your System:</h3>
+    <pre><code>sudo reboot now</code></pre>
+
+    <!-- Load vfio-pci modules -->
+    <h3>Load vfio-pci modules:</h3>
+    <pre><code>sudo modprobe vfio-pci</code></pre>
+
+    <!-- Add the GPU to Your VM in KVM -->
+    <h3>Add the GPU to Your VM in KVM:</h3>
+    <p><em>In your VM settings, click "Add" and select your NVIDIA GPU and NVIDIA audio device.</em></p>
+
+<!-- Final Warnings -->
+<h4 style="text-align: center; font-size: 16px; margin-top: 40px;">
+  <strong>MAKE SURE TO USE THE CORRECT HDMI PORT CONNECTED TO YOUR MOTHERBOARD WHEN YOU PASSTHROUGH YOUR DEDICATED GPU TO A VM IF YOU ONLY HAVE ONE DEDICATED GPU AND AN iGPU YOU CAN USE.</strong>
+</h4>
+
+<h4 style="text-align: center; font-size: 16px; margin-top: 10px;">
+  <strong>ALSO MAKE SURE THAT YOU INSTALLED NVIDIA DRIVERS, LOOKING GLASS AND SPICE TOOLS.</strong>
+</h4>
+
+<h5 style="text-align: center; font-size: 14px; margin-top: 20px;">
+  Make sure most of the HTML script is written by ChatGPT, but not the text.
+</h5>
